@@ -1,0 +1,25 @@
+# Process groups reported by process-exporter. The group name becomes `service_name`
+# in Prometheus, so use the same name as OTEL_SERVICE_NAME and the systemd unit.
+# Edit for the services on your servers (same file on every server is fine: groups
+# with no matching process are simply absent).
+process_names:
+  # Python services started by opentelemetry-instrument -> uvicorn (lab layout /opt/<svc>/venv).
+  - name: orders
+    cmdline:
+      - '/opt/orders/venv/bin/uvicorn'
+  - name: inventory
+    cmdline:
+      - '/opt/inventory/venv/bin/uvicorn'
+  - name: nginx
+    comm:
+      - nginx
+  - name: redis
+    comm:
+      - redis-server
+  # Examples:
+  # - name: billing              # Java service: match on the jar in the command line
+  #   cmdline:
+  #     - 'billing-service\.jar'
+  # - name: postgres
+  #   comm:
+  #     - postgres

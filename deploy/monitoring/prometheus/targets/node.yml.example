@@ -1,0 +1,10 @@
+# Copy to node.yml. One entry per server running the agent (deploy/agent).
+# `instance` is the host name shown in the dashboards' Host filter. It must equal
+# HOST_NAME in that server's agent .env, so OTel metrics and exporter metrics line up.
+- targets: ["10.0.0.11:9100"]
+  labels: { instance: app1 }
+- targets: ["10.0.0.12:9100"]
+  labels: { instance: app2 }
+# The monitoring server itself, if it runs the agent too (recommended: disk/CPU alerts for it).
+- targets: ["10.0.0.10:9100"]
+  labels: { instance: monitoring }

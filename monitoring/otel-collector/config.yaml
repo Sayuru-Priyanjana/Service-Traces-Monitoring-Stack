@@ -1,0 +1,73 @@
+# OpenTelemetry Collector.
+#   metrics: OTLP -> Prometheus exporter (:8889, scraped by Prometheus)
+#   traces:  OTLP -> Tempo (tempo:4317 on the compose network)
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 400
+    spike_limit_mib: 100
+  batch: {}
+
+  # Lab: no sampling processor, i.e. 100% of traces are kept.
+  # Production example - tail sampling (decided per trace after all spans arrived):
+  # keep every trace with an error or slower than 300 ms, plus 10% of the rest.
+  # Policies are OR-ed. All spans of a trace must reach the same collector instance
+  # (with several collectors, put a loadbalancing exporter keyed on traceID in front).
+  # Add it to the traces pipeline: processors: [memory_limiter, tail_sampling, batch]
+  # tail_sampling:
+  #   decision_wait: 10s
+  #   num_traces: 50000
+  #   expected_new_traces_per_sec: 100
+  #   policies:
+  #     - name: keep-errors
+  #       type: status_code
+  #       status_code: { status_codes: [ERROR] }
+  #     - name: keep-slow
+  #       type: latency
+  #       latency: { threshold_ms: 300 }
+  #     - name: sample-rest
+  #       type: probabilistic
+  #       probabilistic: { sampling_percentage: 10 }
+
+exporters:
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    # Turns resource attributes (service.name, host.name, ...) into labels
+    # (service_name, host_name, ...) so dashboards can filter by service.
+    # Collector 0.162 logs a deprecation warning for this setting (successor:
+    # resource_constant_labels); it still works and is kept for broad compatibility.
+    resource_to_telemetry_conversion:
+      enabled: true
+    # OpenMetrics format exposes exemplars (trace IDs on histogram buckets) on scrape.
+    enable_open_metrics: true
+
+  # "otlp_grpc" is the OTLP gRPC exporter (the old "otlp" alias is deprecated in 0.162).
+  otlp_grpc/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true   # plain gRPC on the internal docker network
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [prometheus]
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlp_grpc/tempo]

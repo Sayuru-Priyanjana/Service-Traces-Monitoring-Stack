@@ -1,0 +1,81 @@
+# Production Prometheus. Job names (node, process, otel-collector, tempo) and the
+# service_name / instance labels match what the dashboards query, so keep them.
+#
+# Every service-level series gets a `service_name` label:
+#   - OTel metrics:            from the service.name resource attribute (collector)
+#   - process-exporter:        copied from `groupname`
+#   - node_systemd_unit_state: derived from the unit name (orders.service -> orders)
+# So name things consistently: OTEL_SERVICE_NAME = process-exporter group = systemd unit name.
+#
+# Hosts are listed in targets/node.yml and targets/process.yml (file-based service discovery).
+# Prometheus re-reads those files by itself; adding a server needs no restart.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+        labels: { instance: monitoring }
+
+  # Application metrics (OTel SDK -> agent -> gateway collector).
+  - job_name: otel-collector
+    static_configs:
+      - targets: ["otel-collector:8889"]
+        labels: { instance: otel-collector }
+    metric_relabel_configs:
+      # host.name resource attribute -> instance, consistent with the exporters below
+      - source_labels: [host_name]
+        regex: (.+)
+        target_label: instance
+
+  # The gateway collector's own health (dropped / refused data).
+  - job_name: otelcol
+    static_configs:
+      - targets: ["otel-collector:8888"]
+        labels: { instance: otel-collector }
+
+  - job_name: node
+    file_sd_configs:
+      - files: [/etc/prometheus/targets/node.yml]
+    metric_relabel_configs:
+      # unit name without ".service" -> service_name
+      - source_labels: [__name__, name]
+        regex: node_systemd_unit_state;(.+)\.service
+        target_label: service_name
+        replacement: $1
+      # Units whose name differs from the service name. Add your own mappings here.
+      - source_labels: [__name__, name]
+        regex: node_systemd_unit_state;redis-server\.service
+        target_label: service_name
+        replacement: redis
+
+  - job_name: process
+    file_sd_configs:
+      - files: [/etc/prometheus/targets/process.yml]
+    metric_relabel_configs:
+      - source_labels: [groupname]
+        regex: (.+)
+        target_label: service_name
+
+  - job_name: alertmanager
+    static_configs:
+      - targets: ["alertmanager:9093"]
+        labels: { instance: alertmanager }
+
+  # Tempo's own metrics. traces_spanmetrics_* / traces_service_graph_* are not scraped:
+  # Tempo's metrics-generator pushes them via remote write (with exemplars).
+  - job_name: tempo
+    static_configs:
+      - targets: ["tempo:3200"]
+        labels: { instance: tempo }

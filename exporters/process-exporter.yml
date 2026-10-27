@@ -1,0 +1,17 @@
+# Installed to /etc/process-exporter/all.yaml by provision/exporters.sh.
+# The group name becomes the `groupname` label; Prometheus copies it into `service_name`.
+process_names:
+  # opentelemetry-instrument execs uvicorn, so the cmdline is
+  # /opt/orders/venv/bin/python3 /opt/orders/venv/bin/uvicorn main:app ...
+  - name: orders
+    cmdline:
+      - '/opt/orders/venv/bin/uvicorn'
+  - name: inventory
+    cmdline:
+      - '/opt/inventory/venv/bin/uvicorn'
+  - name: nginx
+    comm:
+      - nginx
+  - name: redis
+    comm:
+      - redis-server

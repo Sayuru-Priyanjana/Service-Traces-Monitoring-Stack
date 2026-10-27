@@ -1,0 +1,60 @@
+# OpenTelemetry Collector - agent on each application server.
+# Apps send OTLP to 127.0.0.1:4317 (gRPC) / :4318 (HTTP); the agent stamps the host name,
+# batches, and forwards to the gateway. If the gateway is unreachable, data is queued on
+# disk (./data/otel-queue) and sent once it is back.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 127.0.0.1:${env:AGENT_OTLP_GRPC_PORT}
+      http:
+        endpoint: 127.0.0.1:${env:AGENT_OTLP_HTTP_PORT}
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 20
+  # host.name becomes the `instance` label in Prometheus (Host filter in the dashboards).
+  resource:
+    attributes:
+      - key: host.name
+        value: ${env:HOST_NAME}
+        action: upsert
+      - key: deployment.environment
+        value: ${env:DEPLOYMENT_ENVIRONMENT}
+        action: upsert
+  batch: {}
+
+exporters:
+  otlp_grpc/gateway:
+    endpoint: ${env:GATEWAY_OTLP_ENDPOINT}
+    tls:
+      insecure: ${env:GATEWAY_TLS_INSECURE}
+      # With TLS and a private CA:
+      # ca_file: /etc/otelcol-contrib/certs/ca.crt
+    sending_queue:
+      storage: file_storage
+    retry_on_failure:
+      enabled: true
+      max_elapsed_time: 0   # keep retrying while the queue has room
+
+extensions:
+  file_storage:
+    directory: /var/lib/otelcol/queue
+    create_directory: true
+  health_check:
+    endpoint: 127.0.0.1:13133
+
+service:
+  extensions: [file_storage, health_check]
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlp_grpc/gateway]
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlp_grpc/gateway]

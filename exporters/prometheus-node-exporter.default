@@ -1,0 +1,2 @@
+# Installed to /etc/default/prometheus-node-exporter by provision/exporters.sh
+ARGS="--collector.systemd --collector.systemd.unit-include=(nginx|redis-server|orders|inventory|ssh)[.]service"

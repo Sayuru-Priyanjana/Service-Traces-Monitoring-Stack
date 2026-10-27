@@ -1,0 +1,104 @@
+# OpenTelemetry Collector - gateway on the monitoring server.
+#   Input:   OTLP from the agent collectors on the app servers (or straight from apps).
+#   metrics: -> Prometheus exporter (:8889, scraped by Prometheus)
+#   traces:  -> PII scrubbing -> Tempo (tempo:4317 on the compose network)
+# host.name / deployment.environment are set by the agent collector on each app server.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+        # To require TLS from the agents, mount a cert/key into the container and add:
+        # tls:
+        #   cert_file: /etc/otelcol-contrib/certs/gateway.crt
+        #   key_file: /etc/otelcol-contrib/certs/gateway.key
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Percentages are of the container memory limit (2g in docker-compose.yml).
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 20
+  batch: {}
+
+  # Drop data that commonly contains personal data before it is stored.
+  # Query strings can hold e-mails, tokens, search terms; client IPs are personal data.
+  # Extend this list for your own span attributes.
+  transform/scrub:
+    error_mode: ignore
+    trace_statements:
+      - context: span
+        statements:
+          - replace_pattern(attributes["http.target"], "\\?.*$", "")
+          - replace_pattern(attributes["http.url"], "\\?.*$", "")
+          - replace_pattern(attributes["url.full"], "\\?.*$", "")
+          - delete_key(attributes, "url.query")
+          - delete_key(attributes, "http.client_ip")
+          - delete_key(attributes, "client.address")
+          - delete_key(attributes, "net.sock.peer.addr")
+
+  # 100% of traces are kept by default. When trace volume (Tempo disk / memory) gets too high,
+  # enable tail sampling: keep every error and every trace slower than 300 ms, plus 10% of
+  # the rest. Add it to the traces pipeline: [memory_limiter, transform/scrub, tail_sampling, batch]
+  # Note: Tempo builds span metrics from the spans it receives, so with sampling the
+  # traces_spanmetrics_* rates on the Traces/Actions dashboards count only the kept spans.
+  # The Service Monitoring dashboard uses SDK metrics and stays exact.
+  # tail_sampling:
+  #   decision_wait: 10s
+  #   num_traces: 50000
+  #   expected_new_traces_per_sec: 100
+  #   policies:
+  #     - name: keep-errors
+  #       type: status_code
+  #       status_code: { status_codes: [ERROR] }
+  #     - name: keep-slow
+  #       type: latency
+  #       latency: { threshold_ms: 300 }
+  #     - name: sample-rest
+  #       type: probabilistic
+  #       probabilistic: { sampling_percentage: 10 }
+
+exporters:
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    # Resource attributes (service.name, host.name, ...) become labels (service_name,
+    # host_name, ...) so dashboards can filter by service and host.
+    resource_to_telemetry_conversion:
+      enabled: true
+    # OpenMetrics format exposes exemplars (trace IDs on histogram buckets).
+    enable_open_metrics: true
+    # Series of a service that stopped sending disappear after this time.
+    metric_expiration: 5m
+
+  otlp_grpc/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true   # plain gRPC on the internal docker network
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  telemetry:
+    # Collector's own metrics (accepted/refused/failed spans and points) on :8888 for alerting.
+    metrics:
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 0.0.0.0
+                port: 8888
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [prometheus]
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, transform/scrub, batch]
+      exporters: [otlp_grpc/tempo]

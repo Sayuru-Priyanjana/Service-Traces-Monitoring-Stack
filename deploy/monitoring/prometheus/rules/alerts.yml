@@ -1,0 +1,122 @@
+# Alert rules, evaluated by Prometheus and sent to Alertmanager.
+# Thresholds are starting points: tune them to your services after a week of real traffic.
+groups:
+  - name: availability
+    rules:
+      - alert: TargetDown
+        expr: up == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $labels.job }} on {{ $labels.instance }} is not reachable"
+          description: "Prometheus cannot scrape {{ $labels.job }} on {{ $labels.instance }} for 2 minutes (host down, agent stopped, or firewall)."
+
+      - alert: ServiceNotActive
+        expr: node_systemd_unit_state{state="active"} == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $labels.name }} is not active on {{ $labels.instance }}"
+          description: "systemd unit {{ $labels.name }} has not been active for 2 minutes."
+
+      - alert: ProcessNotRunning
+        expr: namedprocess_namegroup_num_procs == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "No {{ $labels.groupname }} process on {{ $labels.instance }}"
+          description: "process-exporter finds no process for group {{ $labels.groupname }} for 2 minutes."
+
+  - name: services
+    rules:
+      # OTel HTTP server metrics (Python instrumentation, old HTTP semantic conventions).
+      - alert: HighErrorRate
+        expr: |
+          100 * sum by (service_name) (rate(http_server_duration_milliseconds_count{http_status_code=~"5.."}[5m]))
+            / sum by (service_name) (rate(http_server_duration_milliseconds_count[5m])) > 5
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.service_name }}: {{ printf \"%.1f\" $value }}% of requests fail (5xx)"
+          description: "More than 5% of HTTP requests to {{ $labels.service_name }} returned 5xx over the last 5 minutes."
+
+      - alert: HighLatencyP95
+        expr: |
+          histogram_quantile(0.95, sum by (service_name, le) (rate(http_server_duration_milliseconds_bucket[5m]))) > 1000
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.service_name }}: p95 latency {{ printf \"%.0f\" $value }} ms"
+          description: "95th percentile HTTP latency of {{ $labels.service_name }} is above 1 s for 10 minutes."
+
+  - name: hosts
+    rules:
+      - alert: HostHighCpu
+        expr: 100 * (1 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m]))) > 90
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.instance }}: CPU {{ printf \"%.0f\" $value }}%"
+
+      - alert: HostLowMemory
+        expr: 100 * node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 10
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.instance }}: only {{ printf \"%.0f\" $value }}% memory available"
+
+      - alert: HostDiskSpaceLow
+        expr: |
+          100 * node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs"}
+            / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs"} < 10
+          and node_filesystem_readonly == 0
+        for: 10m
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $labels.instance }}: {{ $labels.mountpoint }} has {{ printf \"%.0f\" $value }}% free"
+
+      - alert: HostDiskFillsIn24h
+        expr: |
+          predict_linear(node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs"}[6h], 24 * 3600) < 0
+          and node_filesystem_readonly == 0
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.instance }}: {{ $labels.mountpoint }} will be full within 24 h at the current rate"
+
+  # Collector counters are exposed with or without `_total` depending on the collector
+  # version (0.162 has none), so the names are matched with a regex. A send_failed series
+  # only appears after the first failure.
+  - name: monitoring-pipeline
+    rules:
+      - alert: CollectorDroppingData
+        expr: |
+          sum by (exporter) (rate({__name__=~"otelcol_exporter_send_failed_spans(_total)?"}[5m])) > 0
+          or sum by (exporter) (rate({__name__=~"otelcol_exporter_send_failed_metric_points(_total)?"}[5m])) > 0
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "OTel gateway collector fails to export data ({{ $labels.exporter }})"
+          description: "Check `docker compose logs otel-collector` and Tempo / Prometheus health."
+
+      - alert: CollectorRefusingData
+        expr: |
+          sum(rate({__name__=~"otelcol_receiver_refused_spans(_total)?"}[5m])) > 0
+          or sum(rate({__name__=~"otelcol_receiver_refused_metric_points(_total)?"}[5m])) > 0
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "OTel gateway collector refuses incoming data (memory limit reached?)"
+
+      - alert: PrometheusRuleEvaluationFailures
+        expr: increase(prometheus_rule_evaluation_failures_total[10m]) > 0
+        labels: { severity: warning }
+        annotations:
+          summary: "Prometheus fails to evaluate alert rules"
+
+      - alert: AlertmanagerNotificationsFailing
+        expr: rate(alertmanager_notifications_failed_total[5m]) > 0
+        for: 10m
+        labels: { severity: critical }
+        annotations:
+          summary: "Alertmanager cannot deliver notifications via {{ $labels.integration }}"

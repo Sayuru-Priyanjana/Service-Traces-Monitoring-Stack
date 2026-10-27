@@ -1,0 +1,9 @@
+fastapi==0.143.0
+uvicorn==0.54.0
+httpx==0.28.1
+opentelemetry-distro==0.66b1
+opentelemetry-exporter-otlp==1.45.1
+# Also installed by `opentelemetry-bootstrap -a install`; pinned so traces never depend on detection.
+opentelemetry-instrumentation-fastapi==0.66b1
+opentelemetry-instrumentation-httpx==0.66b1
+opentelemetry-processor-baggage==0.66b1

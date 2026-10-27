@@ -1,0 +1,59 @@
+apiVersion: 1
+
+# Note: in provisioning files `$` starts an env-var reference, so PromQL/Grafana
+# variables are written as `$$`.
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: 15s
+      # Exemplars on latency charts link to the trace in Tempo. The label holding the
+      # trace ID differs per source (checked with /api/v1/query_exemplars):
+      #   trace_id - OTel SDK exemplars via the collector (http_server_duration_*)
+      #   traceID  - Tempo metrics-generator exemplars via remote write (traces_spanmetrics_*)
+      exemplarTraceIdDestinations:
+        - name: trace_id
+          datasourceUid: tempo
+        - name: traceID
+          datasourceUid: tempo
+
+  - name: Tempo
+    uid: tempo
+    type: tempo
+    access: proxy
+    url: http://tempo:3200
+    editable: false
+    jsonData:
+      # Service graph + node graph come from Tempo's metrics-generator series in Prometheus.
+      serviceMap:
+        datasourceUid: prometheus
+      nodeGraph:
+        enabled: true
+      search:
+        hide: false
+      streamingEnabled:
+        search: true
+      traceQuery:
+        timeShiftEnabled: true
+        spanStartTimeShift: "-30m"
+        spanEndTimeShift: "30m"
+      # "Related metrics" links on each span -> span-metrics in Prometheus.
+      tracesToMetrics:
+        datasourceUid: prometheus
+        spanStartTimeShift: "-5m"
+        spanEndTimeShift: "5m"
+        tags:
+          - key: service.name
+            value: service
+        queries:
+          - name: Request rate (span)
+            query: 'sum(rate(traces_spanmetrics_calls_total{$$__tags, span_name="$${__span.name}"}[1m]))'
+          - name: Error rate (span)
+            query: 'sum(rate(traces_spanmetrics_calls_total{$$__tags, span_name="$${__span.name}", status_code="STATUS_CODE_ERROR"}[1m]))'
+          - name: p95 latency (span)
+            query: 'histogram_quantile(0.95, sum by (le) (rate(traces_spanmetrics_latency_bucket{$$__tags, span_name="$${__span.name}"}[1m])))'

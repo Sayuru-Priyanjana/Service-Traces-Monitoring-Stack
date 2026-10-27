@@ -1,0 +1,48 @@
+# Alertmanager: where alerts go. Out of the box alerts are only visible in Grafana
+# (Alerting -> Alert rules / Silences) and in Alertmanager itself. Configure a receiver
+# below, then `sudo ./deploy.sh` (or `docker compose restart alertmanager`).
+# Validate with: docker run --rm -v "$PWD/alertmanager:/c" --entrypoint amtool prom/alertmanager:v0.28.1 check-config /c/alertmanager.yml
+
+route:
+  receiver: default
+  group_by: [alertname, instance, service_name]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  # Example: send critical alerts somewhere else.
+  # routes:
+  #   - matchers: [severity="critical"]
+  #     receiver: oncall
+
+# While a host is unreachable, don't also page for every service on it.
+inhibit_rules:
+  - source_matchers: [alertname="TargetDown", job="node"]
+    target_matchers: [severity=~"warning|critical"]
+    equal: [instance]
+
+receivers:
+  - name: default
+    # E-mail:
+    # email_configs:
+    #   - to: ops-team@example.com
+    #     from: alertmanager@example.com
+    #     smarthost: smtp.example.com:587
+    #     auth_username: alertmanager@example.com
+    #     auth_password_file: /etc/alertmanager/smtp_password   # mount the file read-only
+    #     send_resolved: true
+    #
+    # Slack (incoming webhook):
+    # slack_configs:
+    #   - api_url_file: /etc/alertmanager/slack_webhook_url
+    #     channel: "#alerts"
+    #     send_resolved: true
+    #
+    # Microsoft Teams (Workflows webhook):
+    # msteamsv2_configs:
+    #   - webhook_url_file: /etc/alertmanager/teams_webhook_url
+    #     send_resolved: true
+    #
+    # Any HTTP endpoint:
+    # webhook_configs:
+    #   - url: https://hooks.example.com/alertmanager
+    #     send_resolved: true

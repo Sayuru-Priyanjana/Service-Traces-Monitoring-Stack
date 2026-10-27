@@ -1,0 +1,59 @@
+# Every service-level series ends up with a `service_name` label:
+#   - OTel metrics:            from the service.name resource attribute (collector)
+#   - process-exporter:        copied from `groupname`
+#   - node_systemd_unit_state: derived from the unit name (redis-server.service -> redis)
+# `instance` is set to the host name (app1/app2) so the $host variable matches everywhere.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+        labels: { instance: monitor }
+
+  - job_name: otel-collector
+    static_configs:
+      - targets: ["otel-collector:8889"]
+        labels: { instance: otel-collector }
+    metric_relabel_configs:
+      # host.name resource attribute -> instance, consistent with the exporters below
+      - source_labels: [host_name]
+        regex: (.+)
+        target_label: instance
+
+  - job_name: node
+    static_configs:
+      - targets: ["192.168.56.11:9100"]
+        labels: { instance: app1 }
+      - targets: ["192.168.56.12:9100"]
+        labels: { instance: app2 }
+    metric_relabel_configs:
+      - source_labels: [__name__, name]
+        regex: node_systemd_unit_state;redis-server\.service
+        target_label: service_name
+        replacement: redis
+      - source_labels: [__name__, name]
+        regex: node_systemd_unit_state;(orders|inventory|nginx|ssh)\.service
+        target_label: service_name
+        replacement: $1
+
+  - job_name: process
+    static_configs:
+      - targets: ["192.168.56.11:9256"]
+        labels: { instance: app1 }
+      - targets: ["192.168.56.12:9256"]
+        labels: { instance: app2 }
+    metric_relabel_configs:
+      - source_labels: [groupname]
+        regex: (.+)
+        target_label: service_name
+
+  # Tempo's own metrics. The traces_spanmetrics_* / traces_service_graph_* series are
+  # not scraped: Tempo's metrics-generator pushes them via remote write (with exemplars).
+  - job_name: tempo
+    static_configs:
+      - targets: ["tempo:3200"]
+        labels: { instance: tempo }

@@ -1,0 +1,5 @@
+# Secrets and per-server state: never commit these.
+.env
+monitoring/certs/
+monitoring/prometheus/targets/*.yml
+agent/data/

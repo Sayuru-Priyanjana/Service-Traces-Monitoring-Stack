@@ -1,0 +1,7 @@
+# Copy to process.yml. Same hosts and instance names as node.yml, port 9256.
+- targets: ["10.0.0.11:9256"]
+  labels: { instance: app1 }
+- targets: ["10.0.0.12:9256"]
+  labels: { instance: app2 }
+- targets: ["10.0.0.10:9256"]
+  labels: { instance: monitoring }

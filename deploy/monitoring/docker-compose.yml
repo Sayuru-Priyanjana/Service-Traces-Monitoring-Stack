@@ -1,0 +1,129 @@
+# Production monitoring stack: OTel Collector (gateway) + Prometheus + Alertmanager + Tempo + Grafana.
+# Runs on the monitoring server (a dedicated host, or one of the application servers).
+# Configure through .env (copy .env.example), then run `sudo ./deploy.sh`.
+#
+# Exposure:
+#   Grafana      ${GRAFANA_BIND_IP}:${GRAFANA_PORT}  HTTPS + login
+#   OTLP gRPC    ${OTLP_BIND_IP}:4317                from app servers only (firewall)
+#   OTLP HTTP    ${OTLP_BIND_IP}:4318
+#   Prometheus, Alertmanager, Tempo: 127.0.0.1 only (use an SSH tunnel to reach them)
+name: observability
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.162.0
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ./otel-collector/config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    ports:
+      - "${OTLP_BIND_IP:?set OTLP_BIND_IP in .env}:4317:4317"   # OTLP gRPC from app servers
+      - "${OTLP_BIND_IP}:4318:4318"                              # OTLP HTTP from app servers
+      # 8889 (prometheus exporter), 8888 (own metrics) and 13133 (health) stay on the compose network.
+    deploy:
+      resources:
+        limits: { memory: 2g }
+    logging: *logging
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.15.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${PROM_RETENTION_TIME:-30d}
+      - --storage.tsdb.retention.size=${PROM_RETENTION_SIZE:-50GB}
+      - --web.enable-lifecycle                # POST /-/reload after config changes (deploy.sh)
+      - --web.enable-remote-write-receiver    # Tempo metrics-generator pushes span metrics here
+      - --enable-feature=exemplar-storage     # trace exemplars on latency histograms
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
+      - ./prometheus/targets:/etc/prometheus/targets:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    deploy:
+      resources:
+        limits: { memory: 4g }
+    logging: *logging
+    restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+      - --web.external-url=${ALERTMANAGER_EXTERNAL_URL:-http://localhost:9093}
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    ports:
+      - "127.0.0.1:9093:9093"
+    deploy:
+      resources:
+        limits: { memory: 256m }
+    logging: *logging
+    restart: unless-stopped
+
+  tempo:
+    image: grafana/tempo:3.1.0
+    command: ["-target=all", "-config.file=/etc/tempo/tempo.yaml"]
+    volumes:
+      - ./tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    ports:
+      - "127.0.0.1:3200:3200"   # Tempo's OTLP receiver is not published: only the collector sends to it
+    depends_on:
+      - prometheus
+    deploy:
+      resources:
+        limits: { memory: 4g }
+    logging: *logging
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:13.2.3
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      # Only used when Grafana creates its database (first start). Change it later in the UI.
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in .env}
+      GF_SERVER_PROTOCOL: https
+      GF_SERVER_CERT_FILE: /etc/grafana/certs/grafana.crt
+      GF_SERVER_CERT_KEY: /etc/grafana/certs/grafana.key
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:?set GRAFANA_ROOT_URL in .env}
+      GF_SECURITY_COOKIE_SECURE: "true"
+      GF_SECURITY_DISABLE_GRAVATAR: "true"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/service-monitoring.json
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_LOG_MODE: console
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./certs:/etc/grafana/certs:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_BIND_IP:-0.0.0.0}:${GRAFANA_PORT:-3000}:3000"
+    depends_on:
+      - prometheus
+      - tempo
+      - alertmanager
+    deploy:
+      resources:
+        limits: { memory: 1g }
+    logging: *logging
+    restart: unless-stopped
+
+volumes:
+  prometheus-data:
+  alertmanager-data:
+  tempo-data:
+  grafana-data:

@@ -1,0 +1,30 @@
+[Unit]
+Description=orders FastAPI service (OpenTelemetry auto-instrumented)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=orders
+Group=orders
+WorkingDirectory=/opt/orders
+Environment=INVENTORY_URL=http://192.168.56.12:8002
+Environment=OTEL_SERVICE_NAME=orders
+Environment=OTEL_RESOURCE_ATTRIBUTES=host.name=app1,deployment.environment=lab
+Environment=OTEL_EXPORTER_OTLP_ENDPOINT=http://192.168.56.10:4317
+Environment=OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+Environment=OTEL_METRICS_EXPORTER=otlp
+# Traces go to the collector, which forwards them to Tempo (100% sampled in the lab).
+Environment=OTEL_TRACES_EXPORTER=otlp
+Environment=OTEL_LOGS_EXPORTER=none
+# W3C trace context + baggage headers on outgoing calls (orders -> inventory).
+Environment=OTEL_PROPAGATORS=tracecontext,baggage
+# Don't trace health checks (regex, matched against the URL).
+Environment=OTEL_PYTHON_FASTAPI_EXCLUDED_URLS=/health
+# Push metrics every 15s to match the Prometheus scrape interval (SDK default is 60s).
+Environment=OTEL_METRIC_EXPORT_INTERVAL=15000
+ExecStart=/opt/orders/venv/bin/opentelemetry-instrument /opt/orders/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8001 --no-access-log
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
