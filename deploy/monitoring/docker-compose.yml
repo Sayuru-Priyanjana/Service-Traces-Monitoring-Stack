@@ -1,6 +1,6 @@
 # Production monitoring stack: OTel Collector (gateway) + Prometheus + Alertmanager + Tempo + Grafana.
 # Runs on the monitoring server (a dedicated host, or one of the application servers).
-# Configure through .env (copy .env.example), then run `sudo ./deploy.sh`.
+# Configure through deploy/.env (copy deploy/.env.example), then run `sudo ./deploy.sh`.
 #
 # Exposure:
 #   Grafana      ${GRAFANA_BIND_IP}:${GRAFANA_PORT}  HTTPS + login
@@ -22,7 +22,7 @@ services:
     volumes:
       - ./otel-collector/config.yaml:/etc/otelcol-contrib/config.yaml:ro
     ports:
-      - "${OTLP_BIND_IP:?set OTLP_BIND_IP in .env}:4317:4317"   # OTLP gRPC from app servers
+      - "${OTLP_BIND_IP:?set OTLP_BIND_IP in deploy/.env}:4317:4317"   # OTLP gRPC from app servers
       - "${OTLP_BIND_IP}:4318:4318"                              # OTLP HTTP from app servers
       # 8889 (prometheus exporter), 8888 (own metrics) and 13133 (health) stay on the compose network.
     deploy:
@@ -92,11 +92,11 @@ services:
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       # Only used when Grafana creates its database (first start). Change it later in the UI.
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in .env}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in deploy/.env}
       GF_SERVER_PROTOCOL: https
       GF_SERVER_CERT_FILE: /etc/grafana/certs/grafana.crt
       GF_SERVER_CERT_KEY: /etc/grafana/certs/grafana.key
-      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:?set GRAFANA_ROOT_URL in .env}
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:?set GRAFANA_ROOT_URL in deploy/.env}
       GF_SECURITY_COOKIE_SECURE: "true"
       GF_SECURITY_DISABLE_GRAVATAR: "true"
       GF_AUTH_ANONYMOUS_ENABLED: "false"

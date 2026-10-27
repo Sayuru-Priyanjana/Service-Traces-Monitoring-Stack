@@ -2,7 +2,7 @@
 #   node-exporter     :9100  host metrics + systemd unit states   (scraped by Prometheus)
 #   process-exporter  :9256  per-service CPU / memory / threads    (scraped by Prometheus)
 #   otel-agent        127.0.0.1:4317/4318  OTLP from local apps -> gateway collector
-#                     (profile "otel", enabled via COMPOSE_PROFILES in .env)
+#                     (profile "otel", enabled via COMPOSE_PROFILES in deploy/.env)
 # All use the host network, so ufw rules apply to them (unlike Docker-published ports).
 name: monitoring-agent
 
@@ -19,7 +19,7 @@ services:
       - --path.rootfs=/host
       - --web.listen-address=${EXPORTER_BIND_IP:-0.0.0.0}:9100
       - --collector.systemd
-      - --collector.systemd.unit-include=${SYSTEMD_UNITS:?set SYSTEMD_UNITS in .env}
+      - --collector.systemd.unit-include=${SYSTEMD_UNITS:?set SYSTEMD_UNITS in deploy/.env}
       - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|run|var/lib/docker/.+|var/lib/containers/.+)($$|/)
     network_mode: host
     pid: host
@@ -55,9 +55,9 @@ services:
     command: ["--config=/etc/otelcol-contrib/config.yaml"]
     network_mode: host
     environment:
-      HOST_NAME: ${HOST_NAME:?set HOST_NAME in .env}
+      HOST_NAME: ${HOST_NAME:?set HOST_NAME in deploy/.env}
       DEPLOYMENT_ENVIRONMENT: ${DEPLOYMENT_ENVIRONMENT:-production}
-      GATEWAY_OTLP_ENDPOINT: ${GATEWAY_OTLP_ENDPOINT:?set GATEWAY_OTLP_ENDPOINT in .env}
+      GATEWAY_OTLP_ENDPOINT: ${GATEWAY_OTLP_ENDPOINT:?set GATEWAY_OTLP_ENDPOINT in deploy/.env}
       GATEWAY_TLS_INSECURE: ${GATEWAY_TLS_INSECURE:-true}
       AGENT_OTLP_GRPC_PORT: ${AGENT_OTLP_GRPC_PORT:-4317}
       AGENT_OTLP_HTTP_PORT: ${AGENT_OTLP_HTTP_PORT:-4318}

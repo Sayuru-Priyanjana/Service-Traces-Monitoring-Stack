@@ -6,13 +6,13 @@
 # chain of its own (MONITORING-FW) and jumps to it from DOCKER-USER. Re-running replaces them.
 # Prometheus, Tempo and Alertmanager are bound to 127.0.0.1 and need no rules.
 #
-# Usage: sudo ./firewall-monitoring.sh [path/to/monitoring/.env]          apply now
-#        sudo ./firewall-monitoring.sh --install [path/to/monitoring/.env] apply now + at every boot
+# Usage: sudo ./firewall-monitoring.sh [path/to/deploy/.env]          apply now
+#        sudo ./firewall-monitoring.sh --install [path/to/deploy/.env] apply now + at every boot
 set -euo pipefail
 
 INSTALL=0
 if [ "${1:-}" = "--install" ]; then INSTALL=1; shift; fi
-ENV_FILE="$(realpath "${1:-$(dirname "$0")/../monitoring/.env}")"
+ENV_FILE="$(realpath "${1:-$(dirname "$0")/../.env}")"
 [ -f "$ENV_FILE" ] || { echo "env file $ENV_FILE not found" >&2; exit 1; }
 set -a; . "$ENV_FILE"; set +a
 : "${OTLP_ALLOWED_SOURCES:?set OTLP_ALLOWED_SOURCES in $ENV_FILE}"

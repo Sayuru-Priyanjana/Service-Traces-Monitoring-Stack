@@ -4,10 +4,10 @@
 #
 # This script only ADDS rules for the exporter ports. It does not change ufw's default
 # policy and does not enable ufw, so it cannot cut off your application or SSH traffic.
-# Usage: sudo ./firewall-agent.sh [path/to/agent/.env]
+# Usage: sudo ./firewall-agent.sh [path/to/deploy/.env]
 set -euo pipefail
 
-ENV_FILE="${1:-$(dirname "$0")/../agent/.env}"
+ENV_FILE="${1:-$(dirname "$0")/../.env}"
 [ -f "$ENV_FILE" ] || { echo "env file $ENV_FILE not found" >&2; exit 1; }
 set -a; . "$ENV_FILE"; set +a
 : "${MONITORING_SOURCES:?set MONITORING_SOURCES in $ENV_FILE}"

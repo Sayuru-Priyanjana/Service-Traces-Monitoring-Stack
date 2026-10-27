@@ -8,9 +8,13 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 
 [ "$(id -u)" -eq 0 ] || die "run as root (sudo ./deploy.sh)"
 command -v docker >/dev/null || die "docker not installed (see ../scripts/install-docker.sh)"
-[ -f .env ] || die ".env missing: cp .env.example .env and edit it"
-set -a; . ./.env; set +a
-grep -q 'change-me' .env && die ".env still contains 'change-me'"
+ENV_FILE=../.env
+[ -f "$ENV_FILE" ] || die "deploy/.env missing: cp ../.env.example ../.env and edit it"
+set -a; . "$ENV_FILE"; set +a
+grep -q 'change-me' "$ENV_FILE" && die "deploy/.env still contains 'change-me'"
+# docker compose reads .env from this folder: point it at the shared file.
+[ -e .env ] && [ ! -L .env ] && die "monitoring/.env is a separate file: move its settings into deploy/.env and delete it"
+ln -sfn ../.env .env
 for f in prometheus/targets/node.yml prometheus/targets/process.yml; do
   [ -f "$f" ] || die "$f missing: copy $f.example and list your servers"
 done

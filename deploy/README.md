@@ -11,6 +11,10 @@ VirtualBox or the sample apps.
 | [app-instrumentation/](app-instrumentation/) | each instrumented service | OpenTelemetry env settings for the app |
 | [scripts/](scripts/) | as needed | Docker install, firewall rules |
 
+**Deploying with an AI agent?** [DEPLOYMENT-AGENT.md](DEPLOYMENT-AGENT.md) has a preparation
+checklist and a ready-to-fill prompt that walks an agent through these steps with approval
+gates, verification and a rollback list.
+
 ## Architecture
 
 ```mermaid
@@ -97,17 +101,30 @@ The paths below assume the folder is copied to `/opt/observability` on each serv
 (e.g. `scp -r deploy/ server:/tmp/ && sudo mv /tmp/deploy /opt/observability`).
 Make the scripts executable once: `sudo chmod +x /opt/observability/*/deploy.sh /opt/observability/scripts/*.sh`.
 
-### 1. Docker (every server)
+### 1. Docker and settings (every server)
 
 ```bash
 sudo /opt/observability/scripts/install-docker.sh
+cd /opt/observability
+sudo cp .env.example .env && sudo chmod 600 .env && sudo nano .env
 ```
+
+All settings live in this one file, [.env.example](.env.example). It has three sections:
+
+| Section | Edit on |
+|---------|---------|
+| SHARED (monitoring server IP, environment name) | identical on every server |
+| PER-SERVER (`HOST_NAME`, `EXPORTER_BIND_IP`, `SYSTEMD_UNITS`) | each server, for that server |
+| MONITORING SERVER ONLY (Grafana, retention, firewall sources) | the monitoring server; app servers can leave it as is |
+
+Easiest: fill in the shared and monitoring sections once, copy the file to every server, and
+change only the per-server section there. The deploy scripts link `monitoring/.env` and
+`agent/.env` to this file, so plain `docker compose` commands in those folders use it too.
 
 ### 2. Monitoring server
 
 ```bash
 cd /opt/observability/monitoring
-sudo cp .env.example .env && sudo nano .env        # IPs, Grafana URL + password, firewall sources
 sudo cp prometheus/targets/node.yml.example prometheus/targets/node.yml
 sudo cp prometheus/targets/process.yml.example prometheus/targets/process.yml
 sudo nano prometheus/targets/node.yml prometheus/targets/process.yml   # one entry per server
@@ -115,7 +132,7 @@ sudo nano alertmanager/alertmanager.yml             # where alerts are sent (e-m
 sudo ./deploy.sh
 ```
 
-`deploy.sh` checks `.env`, creates a self-signed certificate if `certs/grafana.crt` is
+`deploy.sh` checks `deploy/.env`, creates a self-signed certificate if `certs/grafana.crt` is
 missing, validates every config (compose, promtool, amtool, collector), starts the stack and
 waits until Grafana, Prometheus, Tempo and Alertmanager are ready. To use a real certificate,
 put `grafana.crt` (full chain) and `grafana.key` into `certs/` before running it.
@@ -123,18 +140,19 @@ put `grafana.crt` (full chain) and `grafana.key` into `certs/` before running it
 Then lock down the published ports and make the rules survive reboots:
 
 ```bash
-sudo /opt/observability/scripts/firewall-monitoring.sh --install /opt/observability/monitoring/.env
+sudo /opt/observability/scripts/firewall-monitoring.sh --install
 ```
 
 ### 3. Agent (every server, including the monitoring server)
 
 ```bash
 cd /opt/observability/agent
-sudo cp .env.example .env && sudo nano .env      # HOST_NAME, EXPORTER_BIND_IP, SYSTEMD_UNITS, GATEWAY_OTLP_ENDPOINT
 sudo nano process-exporter/config.yml            # your service processes
 sudo ./deploy.sh
-sudo /opt/observability/scripts/firewall-agent.sh /opt/observability/agent/.env
+sudo /opt/observability/scripts/firewall-agent.sh
 ```
+
+The agent uses the SHARED and PER-SERVER sections of `deploy/.env`.
 
 `HOST_NAME` must be the same as the `instance` label for this server in the monitoring
 server's `targets/*.yml`. `deploy.sh` prints which process groups it found, so a wrong
@@ -217,7 +235,7 @@ http://localhost:9090.
 | Add a service | Instrument it (step 4), add it to `process-exporter/config.yml` and `SYSTEMD_UNITS` on its server, re-run the agent's `deploy.sh` |
 | Change config / alert rules / dashboards | Edit the files, re-run `sudo ./deploy.sh` (validates first, then reloads) |
 | Upgrade a component | Change the image tag in `docker-compose.yml` (read its release notes first; Tempo and the collector change config formats between versions), test in staging, re-run `deploy.sh` |
-| Grafana admin password | `.env` only applies on the very first start. Later: change it in the Grafana UI, or `docker compose exec grafana grafana cli admin reset-admin-password '<new>'` |
+| Grafana admin password | `GRAFANA_ADMIN_PASSWORD` in `deploy/.env` only applies on the very first start. Later: change it in the Grafana UI, or `docker compose exec grafana grafana cli admin reset-admin-password '<new>'` |
 | Users | Add them in Grafana (*Administration → Users*) as Viewer / Editor, or configure LDAP / OAuth via `GF_AUTH_*` variables |
 | Backup | The configuration is in this folder (keep it in git, without `.env` and `certs/`). Data lives in the Docker volumes `observability_grafana-data` (users, annotations: back this up), `observability_prometheus-data`, `observability_tempo-data`, `observability_alertmanager-data` (silences) |
 | Trace volume too high | Enable `tail_sampling` in `monitoring/otel-collector/config.yaml` (comments explain the trade-off) or move Tempo to object storage |
@@ -229,7 +247,7 @@ http://localhost:9090.
 - [ ] Real TLS certificate for Grafana (or the self-signed one distributed to users)
 - [ ] `firewall-monitoring.sh --install` run, `OTLP_ALLOWED_SOURCES` contains only app servers
 - [ ] `firewall-agent.sh` run on every server, ufw active
-- [ ] `.env` and `certs/` readable by root only (`chmod 600 .env`), never committed to git
+- [ ] `deploy/.env` and `monitoring/certs/` readable by root only (`chmod 600 .env`), never committed to git
 - [ ] Review span attributes of your apps for personal data; extend `transform/scrub` in the gateway config
 - [ ] Never put user IDs, e-mails or tokens into baggage (it is forwarded to every downstream call)
 - [ ] OTLP between servers crosses an untrusted network? Enable TLS on the gateway receiver and set `GATEWAY_TLS_INSECURE=false` (comments in both collector configs)

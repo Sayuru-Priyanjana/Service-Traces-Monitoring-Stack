@@ -10,6 +10,8 @@ traffic and send OpenTelemetry **metrics and traces** to a monitor VM:
   action** (API route) that started it, so all services involved in one action can be seen
   together (dashboard *Actions*).
 
+![Traces dashboard: service graph user → orders → inventory → redis, calls and failed calls between services, and per-service request rate, error rate and p95 latency](docs/img/traces-dashboard-overview.png)
+
 ## Architecture
 
 ```mermaid
